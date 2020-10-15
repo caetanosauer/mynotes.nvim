@@ -50,12 +50,22 @@ function Stack:Create()
     return #self._et
   end
 
+  -- peek
+  function t:peek()
+      if #self._et == 0 then
+          return nil
+      else
+          return self._et[#self._et]
+      end
+  end
+
   -- list values
   function t:list()
     for i,v in pairs(self._et) do
       print(i, v)
     end
   end
+
   return t
 end
 
@@ -64,28 +74,27 @@ local function findHeaders()
     buf = vim.api.nvim_win_get_buf(0)
     lineCount = vim.api.nvim_buf_line_count(buf)
     lines = vim.api.nvim_buf_get_lines(buf, 0, lineCount, true)
-    -- Iterate over lines and collect headings in each level
-    headings = {}
+    -- Iterate over lines and collect folds in each level
     folds = {}
     maxLevel = 0
-    currentLevel = 0
     lastLineNumber = 0
     levelStack = Stack:Create()
     for lineNumber, line in ipairs(lines) do
         pounds, title = string.match(line, '^(#+)%s+(.+)')
         if pounds ~= nil then
             level = string.len(pounds)
-            headings[level] = title
             if folds[level] == nil then
                 folds[level] = {}
             end
-            if level <= currentLevel then
+            -- print(lineNumber, 'level ', level)
+            while (levelStack:getn() > 0) and (level <= levelStack:peek()) do
                 -- finish current fold
-                foldBegin = levelStack:pop()
-                folds[level][foldBegin] = lineNumber-1
+                prevLevel, foldBegin = levelStack:pop(2) -- pop in inverse order
+                -- print(lineNumber, 'pop ', foldBegin, prevLevel)
+                folds[prevLevel][foldBegin] = lineNumber-1
             end
-            levelStack:push(lineNumber)
-            currentLevel = level
+            levelStack:push(lineNumber, level)
+            -- print(lineNumber, 'push ', lineNumber, level)
             if level > maxLevel then
                 maxLevel = level
             end
@@ -95,17 +104,23 @@ local function findHeaders()
         lastLineNumber = lineNumber
     end
     -- finish last remaining fold
-    if currentLevel > 0 then
-        foldBegin = levelStack:pop()
-        folds[currentLevel][foldBegin] = lastLineNumber
+    while levelStack:getn() > 0 do
+        level, foldBegin = levelStack:pop(2) -- pop in inverse order
+        folds[level][foldBegin] = lastLineNumber
     end
     -- create the folds
+    if maxLevel == 0 then
+        return
+    end
+    vim.api.nvim_command('set foldmethod=manual')
+    vim.api.nvim_command('normal zE') -- delete all folds
     for i = 1, maxLevel do
         for first, last in pairs(folds[i]) do
-            print(first, last)
+            -- print(first, last)
             vim.api.nvim_command(string.format('%d,%dfold', first, last))
         end
     end
+    vim.api.nvim_command('normal zM') -- fold everything
 end
 
 return {
